@@ -21,6 +21,8 @@ export function DriverDetailPage() {
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState('');
+  const [approveMessage, setApproveMessage] = useState('');
+  const [approving, setApproving] = useState(false);
 
   const { data, error, loading, setError, reload } = useFetch(
     () => api.get<DriverData>(`/api/drivers?id=${id}`),
@@ -56,6 +58,21 @@ export function DriverDetailPage() {
     }
   };
 
+  const handleApproveAndEmail = async () => {
+    setApproving(true);
+    setApproveMessage('');
+    try {
+      const res = await api.post<{ message: string }>('/api/drivers/approve', { id });
+      setApproveMessage(res.message || 'Driver approved and welcome email sent.');
+      setStatus('approved');
+      await reload();
+    } catch (e) {
+      setApproveMessage(e instanceof Error ? e.message : 'Approval failed');
+    } finally {
+      setApproving(false);
+    }
+  };
+
   if (loading && !data) return <p className="text-gray-500">Loading...</p>;
   if (error && !data) return <p className="text-red-600">{error}</p>;
   if (!data) return null;
@@ -81,6 +98,41 @@ export function DriverDetailPage() {
           No driver app account linked yet. The driver must sign in to the driver app with{' '}
           <strong>{String(driver.email)}</strong> before they can accept job offers.
         </p>
+      )}
+
+      {driver.status !== 'approved' && (
+        <div className="mb-4 rounded border border-green-200 bg-green-50 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-sm text-green-800">Approve &amp; Onboard Driver</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Set status to approved and send a welcome email with account setup instructions.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleApproveAndEmail}
+              disabled={approving}
+              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition-colors shrink-0"
+            >
+              {approving ? (
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" strokeDasharray="31.4" strokeDashoffset="10" strokeLinecap="round"/>
+                </svg>
+              ) : (
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+              )}
+              {approving ? 'Sending...' : 'Approve & Send Welcome Email'}
+            </button>
+          </div>
+          {approveMessage && (
+            <p className={`mt-3 text-xs font-medium ${approveMessage.includes('failed') ? 'text-red-600' : 'text-green-600'}`}>
+              {approveMessage}
+            </p>
+          )}
+        </div>
       )}
 
       {message && (
