@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  @apply rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-sm transition-colors;
+  @apply focus:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/10;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+.card {
+  @apply rounded-lg border border-gray-200 bg-white shadow-sm;
+}
+
+.page-title {
+  @apply text-xl font-semibold tracking-tight text-gray-900;
+}
