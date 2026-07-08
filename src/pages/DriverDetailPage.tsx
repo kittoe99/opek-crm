@@ -138,12 +138,12 @@ export function DriverDetailPage() {
               {approving ? 'Sending...' : 'Approve & Send Welcome Email'}
             </button>
           </div>
-          {approveMessage && (
-            <p className={`mt-3 text-xs font-medium ${approveMessage.includes('failed') ? 'text-red-600' : 'text-green-600'}`}>
-              {approveMessage}
-            </p>
-          )}
         </div>
+      )}
+      {approveMessage && (
+        <p className={`mb-4 rounded px-3 py-2 text-sm ${approveMessage.includes('failed') || approveMessage.includes('NOT') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+          {approveMessage}
+        </p>
       )}
 
       {message && (
