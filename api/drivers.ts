@@ -214,9 +214,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               { sentBy: user.userId, functionName: 'send-email', recordType: 'driver_approved', recordId: id, recipient: driverEmail },
               user.accessToken
             );
-          } catch { /* optional log table */ }
+           } catch { /* optional log table */ }
         }
-        if (fnError) console.error('Failed to send welcome email:', fnError.message);
       }
 
       if (body.states !== undefined) {
