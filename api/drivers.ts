@@ -200,11 +200,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           const record = { name: driverName, email: driverEmail, driver_id: id };
 
-          const { error: fnError } = await invokeEdgeFunction(
+          const { data: fnData, error: fnError } = await invokeEdgeFunction(
             'send-email',
             { type: 'driver_approved', record },
             user.accessToken
           );
+
+          const emailSent = !fnError;
+          const emailError = fnError?.message || null;
 
           if (fnError) {
             console.error('Failed to send welcome email:', fnError.message);
@@ -216,6 +219,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               user.accessToken
             );
           } catch { /* optional log table */ }
+
+          res.status(200).json({ driver, states: (areas ?? []).map((a) => a.state), email_sent: emailSent, email_error: emailError, email_response: fnData });
+          return;
         }
       }
 
@@ -240,7 +246,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('driver_id', id)
         .order('state');
 
-      res.status(200).json({ driver, states: (areas ?? []).map((a) => a.state) });
+      res.status(200).json({ driver, states: (areas ?? []).map((a) => a.state), email_sent: shouldSendEmail ? undefined : false, email_error: shouldSendEmail ? undefined : 'approve_and_email flag not set' });
       return;
     }
 
