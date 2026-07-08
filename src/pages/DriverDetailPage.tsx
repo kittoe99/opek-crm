@@ -63,16 +63,13 @@ export function DriverDetailPage() {
     setApproveMessage('');
     try {
       await api.patch(`/api/drivers?id=${id}`, { status: 'approved' });
+      setStatus('approved');
+      
       const emailRes = await api.post<any>('/api/emails/confirmation', {
         type: 'driver_approved',
         recordId: id,
       });
-      if (emailRes.success) {
-        setApproveMessage('Driver approved and welcome email sent.');
-      } else {
-        setApproveMessage('Approved but email failed: ' + JSON.stringify(emailRes));
-      }
-      setStatus('approved');
+      setApproveMessage('Email API response: ' + JSON.stringify(emailRes));
       await reload();
     } catch (e) {
       setApproveMessage(e instanceof Error ? e.message : 'Approval failed');
