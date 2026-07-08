@@ -183,6 +183,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const shouldSendEmail = body.approve_and_email && body.status === 'approved';
+      let emailResult: { sent: boolean; error: string | null; response: unknown } | null = null;
 
       if (Object.keys(updates).length) {
         const { error: updateError } = await admin.from('drivers').update(updates).eq('id', id);
@@ -206,12 +207,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             user.accessToken
           );
 
-          const emailSent = !fnError;
-          const emailError = fnError?.message || null;
-
-          if (fnError) {
-            console.error('Failed to send welcome email:', fnError.message);
-          }
+          emailResult = { sent: !fnError, error: fnError?.message || null, response: fnData };
 
           try {
             await logEmailSend(
@@ -219,10 +215,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               user.accessToken
             );
           } catch { /* optional log table */ }
-
-          res.status(200).json({ driver, states: (areas ?? []).map((a) => a.state), email_sent: emailSent, email_error: emailError, email_response: fnData });
-          return;
         }
+        if (fnError) console.error('Failed to send welcome email:', fnError.message);
       }
 
       if (body.states !== undefined) {
@@ -246,7 +240,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('driver_id', id)
         .order('state');
 
-      res.status(200).json({ driver, states: (areas ?? []).map((a) => a.state), email_sent: shouldSendEmail ? undefined : false, email_error: shouldSendEmail ? undefined : 'approve_and_email flag not set' });
+      res.status(200).json({ driver, states: (areas ?? []).map((a) => a.state), email_result: emailResult });
       return;
     }
 

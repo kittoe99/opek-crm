@@ -66,12 +66,12 @@ export function DriverDetailPage() {
         status: 'approved',
         approve_and_email: true,
       });
-      if (res.email_sent) {
+      if (res.email_result?.sent) {
         setApproveMessage('Driver approved and welcome email sent.');
-      } else if (res.email_error) {
-        setApproveMessage(`Approved but email failed: ${res.email_error}`);
+      } else if (res.email_result?.error) {
+        setApproveMessage(`Approved but email failed: ${res.email_result.error}`);
       } else {
-        setApproveMessage('Driver approved. Email was not triggered — check the approve_and_email flag.');
+        setApproveMessage('Driver approved.');
       }
       setStatus('approved');
       await reload();
