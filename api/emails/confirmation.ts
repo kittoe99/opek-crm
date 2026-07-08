@@ -2,12 +2,13 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { withAdminAuth, parseBody } from '../_lib/handler.js';
 import { getDbClient, invokeEdgeFunction, logEmailSend } from '../_lib/supabaseAdmin.js';
 
-type EmailType = 'booking' | 'contact' | 'provider_signup';
+type EmailType = 'booking' | 'contact' | 'provider_signup' | 'driver_approved';
 
 const TABLE_MAP: Record<EmailType, string> = {
   booking: 'bookings',
   contact: 'contacts',
   provider_signup: 'provider_signups',
+  driver_approved: 'drivers',
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -87,6 +88,14 @@ function flattenForSendEmail(type: EmailType, row: Record<string, unknown>) {
       email: customer.email,
       phone: customer.phone,
       message: contact.message,
+    };
+  }
+
+  if (type === 'driver_approved') {
+    return {
+      name: (row.full_name || row.email) as string,
+      email: row.email as string,
+      driver_id: row.id as string,
     };
   }
 

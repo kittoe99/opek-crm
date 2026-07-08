@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { withAdminAuth, parseBody } from './_lib/handler.js';
-import { getDbClient, invokeEdgeFunction, logEmailSend } from './_lib/supabaseAdmin.js';
+import { getDbClient } from './_lib/supabaseAdmin.js';
 
 const DRIVER_STATUSES = ['pending', 'approved', 'suspended'] as const;
 
@@ -170,7 +170,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         vehicle_type?: string;
         user_id?: string | null;
         states?: string[] | string;
-        approve_and_email?: boolean;
       }>(req);
 
       const updates: Record<string, unknown> = {};
@@ -182,39 +181,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         updates.status = body.status;
       }
 
-      const shouldSendEmail = body.approve_and_email && body.status === 'approved';
-      let emailResult: { sent: boolean; error: string | null; response: unknown } | null = null;
-
       if (Object.keys(updates).length) {
         const { error: updateError } = await admin.from('drivers').update(updates).eq('id', id);
         if (updateError) {
           res.status(500).json({ error: updateError.message });
           return;
-        }
-      }
-
-      if (shouldSendEmail) {
-        const { data: driver } = await admin.from('drivers').select('*').eq('id', id).single();
-        if (driver) {
-          const driverEmail = driver.email as string;
-          const driverName = (driver.full_name as string) || driverEmail;
-
-          const record = { name: driverName, email: driverEmail, driver_id: id };
-
-          const { data: fnData, error: fnError } = await invokeEdgeFunction(
-            'send-email',
-            { type: 'driver_approved', record },
-            user.accessToken
-          );
-
-          emailResult = { sent: !fnError, error: fnError?.message || null, response: fnData };
-
-          try {
-            await logEmailSend(
-              { sentBy: user.userId, functionName: 'send-email', recordType: 'driver_approved', recordId: id, recipient: driverEmail },
-              user.accessToken
-            );
-           } catch { /* optional log table */ }
         }
       }
 
@@ -239,7 +210,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('driver_id', id)
         .order('state');
 
-      res.status(200).json({ driver, states: (areas ?? []).map((a) => a.state), email_result: emailResult });
+      res.status(200).json({ driver, states: (areas ?? []).map((a) => a.state) });
       return;
     }
 

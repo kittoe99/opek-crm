@@ -62,18 +62,15 @@ export function DriverDetailPage() {
     setApproving(true);
     setApproveMessage('');
     try {
-      const res = await api.patch<any>(`/api/drivers?id=${id}`, {
-        status: 'approved',
-        approve_and_email: true,
+      await api.patch(`/api/drivers?id=${id}`, { status: 'approved' });
+      const emailRes = await api.post<any>('/api/emails/confirmation', {
+        type: 'driver_approved',
+        recordId: id,
       });
-      if (res.email_result?.sent && !res.email_result?.response?.mock) {
+      if (emailRes.success) {
         setApproveMessage('Driver approved and welcome email sent.');
-      } else if (res.email_result?.response?.mock) {
-        setApproveMessage('Email NOT sent — edge function in mock mode (RESEND_API_KEY not configured on edge function).');
-      } else if (res.email_result?.error) {
-        setApproveMessage(`Approved but email failed: ${res.email_result.error}`);
       } else {
-        setApproveMessage('Driver approved. Response: ' + JSON.stringify(res.email_result));
+        setApproveMessage('Approved but email failed: ' + JSON.stringify(emailRes));
       }
       setStatus('approved');
       await reload();
