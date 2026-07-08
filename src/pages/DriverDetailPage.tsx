@@ -66,12 +66,14 @@ export function DriverDetailPage() {
         status: 'approved',
         approve_and_email: true,
       });
-      if (res.email_result?.sent) {
+      if (res.email_result?.sent && !res.email_result?.response?.mock) {
         setApproveMessage('Driver approved and welcome email sent.');
+      } else if (res.email_result?.response?.mock) {
+        setApproveMessage('Email NOT sent — edge function in mock mode (RESEND_API_KEY not configured on edge function).');
       } else if (res.email_result?.error) {
         setApproveMessage(`Approved but email failed: ${res.email_result.error}`);
       } else {
-        setApproveMessage('Driver approved.');
+        setApproveMessage('Driver approved. Response: ' + JSON.stringify(res.email_result));
       }
       setStatus('approved');
       await reload();
