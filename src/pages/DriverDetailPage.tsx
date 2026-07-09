@@ -100,8 +100,8 @@ export function DriverDetailPage() {
 
       {!accountLinked && (
         <p className="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          No driver app account linked yet. The driver must sign in to the driver app with{' '}
-          <strong>{String(driver.email)}</strong> before they can accept job offers.
+          No contractor login linked yet. Send the welcome email so they can create a password at{' '}
+          <strong>opekjunkremoval.com/sign-up</strong> using <strong>{String(driver.email)}</strong>.
         </p>
       )}
 
