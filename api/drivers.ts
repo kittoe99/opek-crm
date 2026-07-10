@@ -4,6 +4,8 @@ import { getDbClient } from './_lib/supabaseAdmin.js';
 
 const DRIVER_STATUSES = ['pending', 'approved', 'suspended'] as const;
 
+type AdminClient = ReturnType<typeof getDbClient>;
+
 function parseStates(input: unknown): string[] {
   if (Array.isArray(input)) {
     return input.map((s) => String(s).trim().toUpperCase()).filter((s) => s.length === 2);
@@ -35,10 +37,15 @@ function statesFromProviderInfo(providerInfo: unknown): string[] {
   return [...new Set([...fromAreas, ...fromLegacy])];
 }
 
-async function syncServiceAreasFromSignup(
-  admin: ReturnType<typeof getDbClient>,
-  driverId: string
-): Promise<string[]> {
+async function writeServiceAreas(admin: AdminClient, driverId: string, states: string[]) {
+  if (!states.length) return;
+  await admin.from('driver_service_areas').upsert(
+    states.map((state) => ({ driver_id: driverId, state })),
+    { onConflict: 'driver_id,state', ignoreDuplicates: true }
+  );
+}
+
+async function syncServiceAreasFromSignup(admin: AdminClient, driverId: string): Promise<string[]> {
   const { data: existing } = await admin
     .from('driver_service_areas')
     .select('state')
@@ -62,10 +69,35 @@ async function syncServiceAreasFromSignup(
   const states = statesFromProviderInfo(signup?.provider_info);
   if (!states.length) return [];
 
-  await admin
-    .from('driver_service_areas')
-    .insert(states.map((state) => ({ driver_id: driverId, state })));
+  await writeServiceAreas(admin, driverId, states);
   return states;
+}
+
+/** Find existing driver by signup id or email (case-insensitive). */
+async function findExistingDriver(
+  admin: AdminClient,
+  opts: { providerSignupId?: string; email?: string }
+) {
+  if (opts.providerSignupId) {
+    const { data } = await admin
+      .from('drivers')
+      .select('*')
+      .eq('provider_signup_id', opts.providerSignupId)
+      .maybeSingle();
+    if (data) return data;
+  }
+  const email = opts.email?.trim().toLowerCase();
+  if (email) {
+    const { data } = await admin
+      .from('drivers')
+      .select('*')
+      .ilike('email', email)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (data) return data;
+  }
+  return null;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -114,6 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const items = drivers.map((d) => ({
         ...d,
         states: (statesByDriver[d.id] ?? []).sort(),
+        has_login: !!d.user_id,
       }));
 
       res.status(200).json({ items });
@@ -157,6 +190,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
         }
 
+        const email = (customer.email || '').trim().toLowerCase();
         const vehicleType =
           String(provider.vehicle_type || '').trim() ||
           (provider.vehicle && typeof provider.vehicle === 'object'
@@ -164,11 +198,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             : '') ||
           null;
 
+        const existing = await findExistingDriver(admin, {
+          providerSignupId: signup.id,
+          email,
+        });
+
+        if (existing) {
+          const updates: Record<string, unknown> = {
+            provider_signup_id: existing.provider_signup_id || signup.id,
+            updated_at: new Date().toISOString(),
+          };
+          if (customer.name) updates.full_name = customer.name;
+          if (customer.phone) updates.phone = customer.phone;
+          if (vehicleType) updates.vehicle_type = vehicleType;
+          if (email && !existing.email) updates.email = email;
+
+          const { data: driver, error: updateError } = await admin
+            .from('drivers')
+            .update(updates)
+            .eq('id', existing.id)
+            .select('*')
+            .single();
+
+          if (updateError || !driver) {
+            res.status(500).json({ error: updateError?.message || 'Failed to update existing driver' });
+            return;
+          }
+
+          await writeServiceAreas(admin, driver.id, states);
+          const { data: areas } = await admin
+            .from('driver_service_areas')
+            .select('state')
+            .eq('driver_id', driver.id)
+            .order('state');
+
+          res.status(200).json({
+            driver,
+            states: (areas ?? []).map((a) => a.state),
+            reused: true,
+          });
+          return;
+        }
+
         const { data: driver, error: insertError } = await admin
           .from('drivers')
           .insert({
             provider_signup_id: signup.id,
-            email: customer.email || '',
+            email,
             full_name: customer.name || '',
             phone: customer.phone || '',
             vehicle_type: vehicleType,
@@ -178,16 +254,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .single();
 
         if (insertError) {
+          // Unique violation — race with another create; return existing.
+          if (insertError.code === '23505') {
+            const raced = await findExistingDriver(admin, {
+              providerSignupId: signup.id,
+              email,
+            });
+            if (raced) {
+              await writeServiceAreas(admin, raced.id, states);
+              res.status(200).json({ driver: raced, states, reused: true });
+              return;
+            }
+          }
           res.status(500).json({ error: insertError.message });
           return;
         }
 
-        // Trigger also syncs from signup; write explicitly so CRM response is accurate.
-        await admin.from('driver_service_areas').upsert(
-          states.map((state) => ({ driver_id: driver.id, state })),
-          { onConflict: 'driver_id,state', ignoreDuplicates: true }
-        );
-
+        await writeServiceAreas(admin, driver.id, states);
         res.status(201).json({ driver, states });
         return;
       }
@@ -195,6 +278,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const email = body.email?.trim().toLowerCase();
       if (!email) {
         res.status(400).json({ error: 'email is required' });
+        return;
+      }
+
+      const existing = await findExistingDriver(admin, { email });
+      if (existing) {
+        res.status(409).json({
+          error: `A driver already exists for ${email}. Open that profile instead of creating a duplicate.`,
+          driver: existing,
+        });
         return;
       }
 
@@ -213,16 +305,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .single();
 
       if (insertError) {
+        if (insertError.code === '23505') {
+          res.status(409).json({ error: `A driver already exists for ${email}.` });
+          return;
+        }
         res.status(500).json({ error: insertError.message });
         return;
       }
 
       const states = parseStates(body.states);
-      if (states.length) {
-        await admin.from('driver_service_areas').insert(
-          states.map((state) => ({ driver_id: driver.id, state }))
-        );
-      }
+      await writeServiceAreas(admin, driver.id, states);
 
       res.status(201).json({ driver, states });
       return;
@@ -268,8 +360,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       } else if (updates.status === 'approved') {
-        // When approving without an explicit states payload, backfill coverage
-        // from the linked provider signup so assign pickers aren't empty.
         await syncServiceAreasFromSignup(admin, id);
       }
 

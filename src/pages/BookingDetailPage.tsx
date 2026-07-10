@@ -24,6 +24,8 @@ interface DriverOption {
   email: string;
   states: string[];
   status: string;
+  has_login?: boolean;
+  identity_status?: string;
 }
 
 interface BookingDetail {
@@ -138,9 +140,11 @@ export function BookingDetailPage() {
   const eligibleDrivers = drivers.filter(
     (d) => !bookingState || d.states.includes(bookingState)
   );
-  // Always list every approved driver. Matching service areas first, then others
-  // (so missing/outdated service-area rows don't hide assignable haulers).
+  // Prefer drivers who can actually receive offers (app login linked).
   const assignableDrivers = [...drivers].sort((a, b) => {
+    const aLogin = Number(!!a.has_login);
+    const bLogin = Number(!!b.has_login);
+    if (aLogin !== bLogin) return bLogin - aLogin;
     const aMatch = bookingState ? Number(a.states.includes(bookingState)) : 1;
     const bMatch = bookingState ? Number(b.states.includes(bookingState)) : 1;
     if (aMatch !== bMatch) return bMatch - aMatch;
@@ -151,6 +155,7 @@ export function BookingDetailPage() {
     !!bookingState &&
     !!selectedDriver &&
     !selectedDriver.states.includes(bookingState);
+  const selectedNoLogin = !!selectedDriver && !selectedDriver.has_login;
 
   return (
     <div>
@@ -228,9 +233,10 @@ export function BookingDetailPage() {
               {assignableDrivers.map((d) => {
                 const inArea = !bookingState || d.states.includes(bookingState);
                 const statesLabel = d.states.join(', ') || 'no states';
+                const loginLabel = d.has_login ? 'app linked' : 'no app login';
                 return (
                   <option key={d.id} value={d.id}>
-                    {d.full_name} ({d.email}) — {statesLabel}
+                    {d.full_name} ({d.email}) — {statesLabel} · {loginLabel}
                     {!inArea && bookingState ? ` · outside ${bookingState}` : ''}
                   </option>
                 );
@@ -245,6 +251,12 @@ export function BookingDetailPage() {
             {selectedOutOfArea && (
               <p className="text-xs text-amber-700">
                 Selected driver is outside {bookingState}. Uncheck “Enforce state geofence” to assign anyway.
+              </p>
+            )}
+            {selectedNoLogin && (
+              <p className="text-xs text-amber-700">
+                This driver has not linked the app yet. They will not see the offer until they sign in with this
+                email.
               </p>
             )}
             <input

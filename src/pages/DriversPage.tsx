@@ -14,6 +14,8 @@ interface DriverRow {
   status: string;
   states: string[];
   created_at: string;
+  has_login?: boolean;
+  identity_status?: string;
 }
 
 export function DriversPage() {
@@ -46,6 +48,11 @@ export function DriversPage() {
               key: 'states',
               label: 'States',
               render: (r) => (r.states?.length ? r.states.join(', ') : '—'),
+            },
+            {
+              key: 'has_login',
+              label: 'App',
+              render: (r) => (r.has_login ? 'Linked' : 'Not linked'),
             },
             {
               key: 'status',
