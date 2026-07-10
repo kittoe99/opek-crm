@@ -138,6 +138,19 @@ export function BookingDetailPage() {
   const eligibleDrivers = drivers.filter(
     (d) => !bookingState || d.states.includes(bookingState)
   );
+  // Always list every approved driver. Matching service areas first, then others
+  // (so missing/outdated service-area rows don't hide assignable haulers).
+  const assignableDrivers = [...drivers].sort((a, b) => {
+    const aMatch = bookingState ? Number(a.states.includes(bookingState)) : 1;
+    const bMatch = bookingState ? Number(b.states.includes(bookingState)) : 1;
+    if (aMatch !== bMatch) return bMatch - aMatch;
+    return a.full_name.localeCompare(b.full_name);
+  });
+  const selectedDriver = drivers.find((d) => d.id === selectedDriverId);
+  const selectedOutOfArea =
+    !!bookingState &&
+    !!selectedDriver &&
+    !selectedDriver.states.includes(bookingState);
 
   return (
     <div>
@@ -212,16 +225,26 @@ export function BookingDetailPage() {
               className="w-full max-w-md"
             >
               <option value="">Select driver…</option>
-              {(bookingState ? eligibleDrivers : drivers).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.full_name} — {d.states.join(', ') || 'no states'}
-                </option>
-              ))}
+              {assignableDrivers.map((d) => {
+                const inArea = !bookingState || d.states.includes(bookingState);
+                const statesLabel = d.states.join(', ') || 'no states';
+                return (
+                  <option key={d.id} value={d.id}>
+                    {d.full_name} ({d.email}) — {statesLabel}
+                    {!inArea && bookingState ? ` · outside ${bookingState}` : ''}
+                  </option>
+                );
+              })}
             </select>
             {bookingState && eligibleDrivers.length === 0 && (
               <p className="text-xs text-amber-700">
-                No approved drivers cover {bookingState}. Assign anyway with geofence override, or add states on the
-                driver profile.
+                No approved drivers cover {bookingState} yet. You can still assign someone below — uncheck
+                “Enforce state geofence” if needed, or add states on the driver profile.
+              </p>
+            )}
+            {selectedOutOfArea && (
+              <p className="text-xs text-amber-700">
+                Selected driver is outside {bookingState}. Uncheck “Enforce state geofence” to assign anyway.
               </p>
             )}
             <input

@@ -17,6 +17,57 @@ function parseStates(input: unknown): string[] {
   return [];
 }
 
+function statesFromProviderInfo(providerInfo: unknown): string[] {
+  if (!providerInfo || typeof providerInfo !== 'object') return [];
+  const info = providerInfo as Record<string, unknown>;
+  const fromAreas: string[] = [];
+  if (Array.isArray(info.service_areas)) {
+    for (const area of info.service_areas) {
+      if (area && typeof area === 'object' && 'state' in area) {
+        const state = String((area as { state?: unknown }).state || '')
+          .trim()
+          .toUpperCase();
+        if (state.length === 2) fromAreas.push(state);
+      }
+    }
+  }
+  const fromLegacy = parseStates(info.service_area);
+  return [...new Set([...fromAreas, ...fromLegacy])];
+}
+
+async function syncServiceAreasFromSignup(
+  admin: ReturnType<typeof getDbClient>,
+  driverId: string
+): Promise<string[]> {
+  const { data: existing } = await admin
+    .from('driver_service_areas')
+    .select('state')
+    .eq('driver_id', driverId);
+  if ((existing ?? []).length > 0) {
+    return (existing ?? []).map((r) => r.state);
+  }
+
+  const { data: driver } = await admin
+    .from('drivers')
+    .select('provider_signup_id')
+    .eq('id', driverId)
+    .maybeSingle();
+  if (!driver?.provider_signup_id) return [];
+
+  const { data: signup } = await admin
+    .from('provider_signups')
+    .select('provider_info')
+    .eq('id', driver.provider_signup_id)
+    .maybeSingle();
+  const states = statesFromProviderInfo(signup?.provider_info);
+  if (!states.length) return [];
+
+  await admin
+    .from('driver_service_areas')
+    .insert(states.map((state) => ({ driver_id: driverId, state })));
+  return states;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   await withAdminAuth(req, res, async (req, res, user) => {
     const admin = getDbClient(user.accessToken);
@@ -94,8 +145,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const customer = (signup.customer_info as Record<string, string>) || {};
         const provider = (signup.provider_info as Record<string, unknown>) || {};
-        const serviceArea = String(provider.service_area || '');
-        const statesFromArea = parseStates(serviceArea);
+        const statesFromSignup = statesFromProviderInfo(provider);
+        const statesFromBody = parseStates(body.states);
+        const states = [...new Set([...statesFromBody, ...statesFromSignup])];
+
+        if (!states.length) {
+          res.status(400).json({
+            error:
+              'This provider signup has no service areas. Ask the hauler to re-submit coverage, or set states manually.',
+          });
+          return;
+        }
+
+        const vehicleType =
+          String(provider.vehicle_type || '').trim() ||
+          (provider.vehicle && typeof provider.vehicle === 'object'
+            ? String((provider.vehicle as { type?: string }).type || '').trim()
+            : '') ||
+          null;
 
         const { data: driver, error: insertError } = await admin
           .from('drivers')
@@ -104,7 +171,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             email: customer.email || '',
             full_name: customer.name || '',
             phone: customer.phone || '',
-            vehicle_type: String(provider.vehicle_type || '') || null,
+            vehicle_type: vehicleType,
             status: 'pending',
           })
           .select('*')
@@ -115,12 +182,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
         }
 
-        const states = parseStates(body.states).length ? parseStates(body.states) : statesFromArea;
-        if (states.length) {
-          await admin.from('driver_service_areas').insert(
-            states.map((state) => ({ driver_id: driver.id, state }))
-          );
-        }
+        // Trigger also syncs from signup; write explicitly so CRM response is accurate.
+        await admin.from('driver_service_areas').upsert(
+          states.map((state) => ({ driver_id: driver.id, state })),
+          { onConflict: 'driver_id,state', ignoreDuplicates: true }
+        );
 
         res.status(201).json({ driver, states });
         return;
@@ -201,6 +267,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return;
           }
         }
+      } else if (updates.status === 'approved') {
+        // When approving without an explicit states payload, backfill coverage
+        // from the linked provider signup so assign pickers aren't empty.
+        await syncServiceAreasFromSignup(admin, id);
       }
 
       const { data: driver } = await admin.from('drivers').select('*').eq('id', id).single();
